@@ -1,0 +1,353 @@
+---
+title: "Conscientiousness_Regression"
+author: "Kristofer Svendsen"
+date: "2026-03-20"
+output: html_document
+---
+
+### Introduction
+
+This exploratory analysis will examine which demographic-based predictors are associated with higher scores on a conscientiousness measure. Conscientiousness is one of the big five personality traits--the others being openness, neuroticism, agreeableness, and extraversion. Conscientiousness is a set of personality constructs related to an individual's propensity to be self-controlled, responsible to others, hardworking, orderly, and rule-abiding. High levels of conscientiousness are associated with high achievement in formal education, high job performance, marital stability, and a lower risk of depression [(Roberts et al., 2014)](https://pubmed.ncbi.nlm.nih.gov/23276130/).
+
+We will be using the bfi data set from the Synthetic Aperture Personality Assessment (SAPA) web based personallity assessment project. The data consist of 2800 responses to five questions designed to assess conscientiousness as well as information about age, gender, and education. 
+
+
+```{r Library, message=FALSE, warning=FALSE}
+library(psych) #contains bfi data set
+library(skimr)
+library(tidyverse)
+library(Hmisc)
+library(MBESS)
+library(lme4)
+library(interactions)
+library(RColorBrewer)
+library(gtsummary)
+library(lm.beta)
+library(car)
+
+
+```
+
+
+
+```{r Load BFI Data Set}
+bfi.raw = bfi #Load dataset
+bfi.raw <- select(bfi.raw, C1:C5, gender:age) #create subset of conscientiousness questions with gender, education and age
+```
+
+
+
+```{r Inspect Data}
+#inspect data
+glimpse(bfi.raw)
+head(bfi.raw)
+colSums(is.na(bfi.raw))
+```
+
+We will need to reassign gender and education as factors. Also, there are many NAs present in the data set. The NAs present in question answers we will inspect further and decide between dropping or imputing; however, we will do this at the end of cleaning to see how many NAs remain. The NAs in education we will drop as we want to examine education as a predictor and our sample is large enough to handle a loss of 223 responses.
+
+### Cleaning
+
+```{r education NAs, verify data types, label variables}
+#remove NAs in education
+bfi.raw <- filter(bfi.raw, !is.na(education)) #removes 223 entries
+colSums(is.na(bfi.raw)) #verify no na in education
+
+#verify and correct data types
+sapply(bfi.raw, class)
+
+bfi.raw$gender<- as.factor(bfi.raw$gender)
+is.factor(bfi.raw$gender)
+
+bfi.raw$education <- as.factor(bfi.raw$education)
+is.factor(bfi.raw$education)
+
+#label gender and education level
+
+bfi.raw$gender <- factor(bfi.raw$gender,
+                         levels = c(1,2),
+                         labels = c("male", "female"))
+summary(bfi.raw$gender)
+
+bfi.raw$education <- factor(bfi.raw$education,
+                            levels = c(1,2,3,4,5),
+                            labels = c("some HS", "HS", "some college", "college", "graduate degree"))
+summary(bfi.raw$education)
+
+```
+
+Next, we will verify the age ranges reported. Our education responses range from "some high school" to "graduate degree". Subsequently, there will be no upper limit to the age range (except for clear input errors) but we will set the low-end bound at 14 years of age.
+```{r verify age}
+summary(bfi.raw$age)
+hist(bfi.raw$age,
+     breaks = 80)
+head(sort(bfi.raw$age), 10) #print the lowest 10 ages
+head(sort(bfi.raw$age, decreasing = TRUE), 10) #print the highest 10 ages
+
+bfi.raw <- filter(bfi.raw, age>11) #removes 2 entries
+summary(bfi.raw)
+```
+
+Now we can investigate our question response NAs further.
+```{r question NAs}
+colSums(is.na(bfi.raw))
+na_rows <- bfi.raw %>% #87 total responses with NAs
+  filter(if_any(everything(), is.na))
+
+na_rows$na_count <- rowSums(is.na(na_rows)) #count number of NAs per participant
+table(na_rows$na_count) #summarize NAs per participant
+
+table(na_rows$education)
+table(na_rows$age)
+table(na_rows$gender)
+```
+From the summary data we can see that the NAs are relatively evenly distributed between the five questions suggesting that there wasn't an issue with a particular question. When looking at the rate of NAs per participant, we see that 80 participants answered NA once, five answered NA twice, and three answered NA three times. This doesn't seem unreasonable in survey responses. Similarly, the education, age, and gender distributions all seem to fairly even and congruent with our overall sample demographics. Thus, considering our sample size, we can afford to drop these 87 participants rather than imputing data such as the column median (the default for the [score.items](https://personality-project.org/r/psych/help/score.items.html)) function.
+```{r drop question NAs}
+bfi.raw <- drop_na(bfi.raw) #removes 87 entries
+```
+
+We can now store our cleaned data set and move on to our analysis.
+```{r store clean df}
+#Store clean data set
+
+bfi.clean <- bfi.raw
+```
+
+### Analysis
+
+First we will calculate our conscientiousness score. Questions 4 and 5 are reverse scored.
+```{r calculate score}
+consc.key = list(consc = c("C2", "C2", "C3", "-C4", "-C5")) #reverse scored items are marked with negative
+consc.scores = scoreItems(consc.key, select(bfi.clean, C1:C5), totals = T, min = 1, max = 6)
+bfi.clean$consc <- consc.scores$scores
+
+hist(bfi.clean$consc)
+```
+
+Next, we will check the reliabilities of our conscientiousness measure. Cronbach's alpha is predominantly reported in psychometric data; however, there has recently been a push away from this measure due to it's assumption of tau-equivalence which assumes that each question is equally adept at assessing the underlying construct. Meeting this assumption is highly unlikely in the context of psychological data due to a variety of factors including question quality and clarity and how the participants interpret the questions in the context of their own experiences. Failure to meet tau-equivalence results in an underestimate of reliability. An alternative reliability measure is McDonald's omega which uses factor analysis is not subject to the same tau-equivalence assumption. Specifically, we will use hierarchical omega. While we endeavor for our survey questions to probe a single construct (or factor), inevitably, minor factors such as similar wording among questions or question contents overlapping with another construct are likely present. Hierarchical omega can accomodate these minor factors [(Kelley & Pornprasertmanit, 2016)](https://pubmed.ncbi.nlm.nih.gov/26962759/). We will calculate and report both reliability measures for easier comparison of results with the existing literature.
+
+Finally, we will also calculate 95% confidence intervals for both reliability measures. Following reccomedations from [Kelley and Pornprasertmanit](https://pubmed.ncbi.nlm.nih.gov/26962759/) we will use a bootstrapped method; however, these calculations can take some time depending on the computing power available, so code is also provided for a quicker but potentially less accurate estimate. 
+
+
+
+```{r reliability measures}
+###### Reliability Measures
+#Determine reliability of conscientiousness measure
+consc <- select(bfi.clean, C1:C5) #take subset of conscientiousness questions
+consc$C4 <- (7 - consc$C4) #flip scoring of reverse scored items: (max_score + 1) - score
+consc$C5 <- (7 - consc$C5)
+
+#reliability and bootstrapped confidence intervals, long to process, best for publication
+consc.alpha <- ci.reliability(consc, type = 'alpha', interval.type = "bca")
+consc.alpha
+
+consc.omegah <- ci.reliability(consc, type = 'hierarchical', interval.type = "bca") 
+consc.omegah
+
+#reliability estimates with quick confidence intervals
+consc.alpha.quick <- ci.reliability(consc, type ='alpha', interval.type = 'feldt')
+consc.alpha.quick
+
+consc.omegah.quick <- ci.reliability(consc, type = 'hierarchical', interval.type = 'icc')
+consc.omegah.quick
+```
+
+Next, we can move on to our regression. By calculating a composite conscientiousness score by summing our likert items we have already assumed equal distance between likert scores and are justified in treating the resulting scores as continuous. We will use linear regression using age, gender, and education as predictor variables. Age is a continuous predictor, gender a binary (in this context), and education ordinal with 5 levels.
+```{r regression}
+##### Regression
+#create a model using age, gender, and education to predict conscientiousness
+
+model0 <- lm(data = bfi.clean, consc ~ 1) #null model
+summary(model0)
+
+model1 <- lm(data = bfi.clean, consc ~ age + gender + education)
+summary(model1)
+
+anova(model0, model1)
+
+plot(model1) #plot residuals to verify assumptions
+#Plot 1 = linearity assumption, good is red line is horizontal/flat
+#Plot 2 = normality assumption, good is follows diagonal line
+#Plot 3 = homoscedasticity, good is red line is horizontal/flat
+#Plot 4 = outliers. 
+
+
+vif(model1) #check variance inflation factor to ensure no interaction between predictor terms
+```
+Before we examine our model, let's first examine our plots of residuals and variance inflation factor. In our Residuals vs Fitted plot, our points are reasonably evenly distributed. The Q-Q plot shows a slight-left skew reflective of our left-skewed distribution of conscientious scores; fortunately, our sample size is large enough that we do not need to worry about this skew significantly affecting our regression results. Our Scale-Location plot shows an interesting pattern; however, this pattern is most likely an artifact of our conscientious score having discrete whole number values. Finally, the Residuals vs Leverage plot shows nothing of  concern. The three most influential points are participants with high ages (59, 64, and 65) with low conscientiousness scores (6 or 7) and there is no justification for dropping them. Finally, the variance inflation factor of our predictors are low values (~1) thus our predictors are uncorrelated. Subsequently, we are able to interpret our regression results without worry.
+
+Our model explains a small but statistically significant amount of variance in our data (adjusted R-squared = 0.026, F(6, 2481) = 12.19, p < 0.001). This is not uncommon in psychometric data, and would be typically classified as a small effect size [(Fritz et al., 2012)](https://pubmed.ncbi.nlm.nih.gov/21823805/). Our focus is more on which levels of our predictors are significant. Age shows a positive relationship with our conscientiousness measure, with a beta-estimate of 0.039 (p < 0.001) which suggests that people become modestly more conscientious with age. A significant effect of gender was also found which shows females to score on average about 0.76 points higher on our measure (p < 0.001). Finally, and most interestingly, the only level of our education predictors that shows a significant difference from our reference level of "some high school" is "some college" (beta-estimate = 0.904, p <0.001) and not any further education level (all p > 0.70).
+
+### Visualisation
+
+First, we will create a data frame with proper punctuation and full length variable names.
+
+```{r create vis df}
+bfi.vis <- select(bfi.clean, gender:age, consc) #create subset for visualizations
+
+bfi.vis <-
+  rename(bfi.vis, 
+         Gender = gender,
+         Education = education,
+         Age = age,
+         Conscientiousness = consc
+         )
+
+
+bfi.vis$Education <- factor(bfi.vis$Education,
+                            levels = c("some HS", "HS", "some college", "college", "graduate degree"),
+                            labels = c("Some High School", "High School", "Some College", "College", "Graduate Degree"))
+
+bfi.vis$Gender <- factor(bfi.vis$Gender,
+                         levels = c("male", "female"),
+                         labels = c("Male", "Female"))
+```
+
+
+Next, we will create a consistent color palette to differentiate the two levels of gender across our visuals. Also included is code for when you have more than two levels to a variable and want to use a color palette set such as RColorBrewer.
+```{r color palette}
+#######Crate consistent color palette
+
+#Use a color palette, best if you have variables with more levels
+#mycolors <- brewer.pal(2, "Set1")
+#names(mycolors) <- levels(bfi.clean$gender)
+#gendercolors <- scale_colour_manual(name = "gender", values = mycolors) #store for scatter plots
+#gendercolorsbar <- scale_fill_manual(name = "gender", values = mycolors) #store for bar charts
+
+#Assign a specific color to each gender
+gendercolors <- scale_colour_manual(values = c("Male" = "#008080", "Female" = "#cc5500")) #store for scatter plots
+gendercolorsbar <- scale_fill_manual(values = c("Male" = "#008080", "Female" = "#cc5500")) #store for bar charts
+
+```
+
+In order to efficiently describe the demographics of our sample, we will create a population pyramid.
+```{r population pyramid}
+####### Create population pyramid
+bins.age <- seq(from = 0, to = 100, by = 5) #define bin size
+
+gender.age <- select(bfi.vis, Gender, Age) #select Gender and Age
+
+gender.age$age_group <- cut(gender.age$Age, bins.age, include.lowest = T, right = F) #organize in bins
+
+pop.pyramid <- gender.age %>% 
+  group_by(Gender) %>% 
+  count(age_group) %>% 
+  arrange(Gender) #arrange Male first for consistent legend format
+
+plot1 <- ggplot(
+  pop.pyramid,
+  aes(
+    x = age_group,
+    fill = Gender,
+    y = ifelse(               #separate Males and Females
+      test = Gender =="Male",
+      yes = -n, #puts Males on left
+      no = n
+    )
+  )
+) +
+  geom_bar(stat = "identity")+
+  gendercolorsbar
+
+plot.pop.pyramid <- plot1 +
+  scale_y_continuous(
+    labels = abs,       #plot absolute values to remove negative used above
+    limits = max(pop.pyramid$n) *c(-1,1) #create symetrical limits
+  ) +
+  theme_minimal()+
+  coord_flip()+
+  labs(
+    x = "Age (years)",
+    y = "Number of Participants",
+    fill = "Gender",
+    title = "Age and Gender Distribution"
+    
+  )
+plot.pop.pyramid 
+```
+
+Next, we will create a bar chart to show education level by gender.
+
+```{r education  by gender vis}
+edu.gender <- select(bfi.vis, Gender, Education) #create subset
+edu.gender.count <- edu.gender %>%  
+  group_by(Gender) %>%  #group by Gender
+  count(Education)     #count participants with each level of education
+  
+
+
+
+plot.edu.gender <- ggplot(edu.gender.count, aes(fill = Gender, y= n, x=Education))+
+  geom_bar(position = "stack", stat = "identity")+
+  labs(y= "Number of Participants", x="Highest Education Level")+
+  ggtitle("Highest Education Level Achieved")+
+  theme_minimal()+
+  gendercolorsbar
+
+plot.edu.gender
+```
+
+Finally, we will create a bar chart to show conscientiousness by gender.
+
+```{r consc by gender vis}
+plot.consc.gender <- ggplot(bfi.vis, aes(fill = Gender, x= Conscientiousness ))+
+  geom_histogram(binwidth = 2, color = "black")+
+  labs(y = "Number of Participants")+
+  theme_minimal()+
+  ggtitle("Conscientiousness Score by Gender")+
+  gendercolorsbar
+plot.consc.gender
+```
+
+### Key Information for Presentation
+
+Now that we have completed our analysis and created our visualizations, we can print our key information for our presentation and export high resolution images of our visualizations.
+
+```{r Summary Stats and figs}
+#summary statistics
+summary(bfi.vis) #easy descriptors of key variables
+tapply(bfi.vis$Conscientiousness, bfi.vis$Gender, summary) #conscientiousness by gender
+tapply(bfi.vis$Age, bfi.vis$Gender, summary) #age by gender
+tapply(bfi.vis$Education, bfi.vis$Gender, summary) #education by gender
+
+
+
+#reliability measures
+consc.alpha #alpha with bootstrapped 95%CI for best report
+consc.omegah #hierarchical omega with boostrapped 95%CI for best report
+
+consc.alpha.quick #alpha with Feldt 95%CI for quick report
+consc.omegah.quick #hierarchical omega with icc 95%CI for quick report
+
+
+#regression
+plot(model1) #assumptions check reporting
+summary(model1) #model report
+
+
+#regression table
+modelvis <- lm(data = bfi.vis, Conscientiousness ~ Age + Gender + Education)
+reg.table <- tbl_regression(modelvis) %>% # create regression table
+  bold_p() %>% 
+  add_glance_table(include = c("r.squared", "adj.r.squared", "nobs", "statistic" , "p.value"))
+reg.table
+
+as_gt(reg.table) %>% # save .png of regression table
+gt::gtsave(filename = "consc_reg_table.png")
+ 
+
+
+# Figures
+plot.pop.pyramid #population pyramid showing gender and age distribution of sample
+ggsave("Population_Pyramid.png", plot = plot.pop.pyramid, width = 15, height = 12, units = "cm")
+
+plot.edu.gender #bar chart showing education level of sample by gender
+ggsave("Education_Level.png", plot = plot.edu.gender, width = 17, height = 12, units = "cm")
+
+plot.consc.gender #histogram showing conscientiousness score by gender
+ggsave("Conscientiousness_Histogram.png", plot = plot.consc.gender, width = 15, height = 12, units = "cm")
+```
+### Conclusion
+
+The results of our survey show that generally, females report as more conscientious than males, and that conscientiousness tends to increase with age. However, our sample also shows an unexpected result: In comparison to our reference education level, the only level of education that showed a significant difference in conscientiousness was "some college" and not those who had completed college or obtained a graduate degree. This is counter to what might be expected as conscentiousness is considered a predictor of higher-education success and thus you would expect to find higher levels of this personality trait present in the higher education population [(Roberts et al., 2014)](https://pubmed.ncbi.nlm.nih.gov/23276130/). 
+
