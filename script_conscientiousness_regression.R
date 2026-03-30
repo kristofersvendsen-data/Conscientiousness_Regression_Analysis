@@ -126,6 +126,7 @@ summary(model0)
 model1 <- lm(data = bfi.clean, consc ~ age + gender + education)
 summary(model1)
 
+
 anova(model0, model1)
 
 plot(model1) #plot residuals to verify assumptions
@@ -249,6 +250,20 @@ plot.consc.gender <- ggplot(bfi.vis, aes(fill = Gender, x= Conscientiousness ))+
 plot.consc.gender
 
 
+###### Conscientiousness by Education Level Plot #####
+
+vio.colors <- c("#264563", "#2a9d8f", "#e9c46a", "#f4a261", "#e76f51") #define colours
+
+plot.consc.edu <- ggplot(bfi.vis, aes( y = Conscientiousness, x = Education, fill = Education))+
+  geom_violin(alpha = 0.8)+
+  geom_boxplot(width = 0.1)+
+  scale_fill_manual(values = vio.colors)+
+  theme_minimal()+
+  theme(legend.position = "none")+
+  ggtitle("Conscientiousness Score by Education Level")
+
+plot.consc.edu
+
 ##### Summary info for write-up ######
 
 summary(bfi.vis) #easy descriptors of key variables
@@ -292,3 +307,6 @@ ggsave("Education_Level.png", plot = plot.edu.gender, width = 17, height = 12, u
 
 plot.consc.gender #histogram showing conscientiousness score by gender
 ggsave("Conscientiousness_Histogram.png", plot = plot.consc.gender, width = 15, height = 12, units = "cm")
+
+plot.consc.edu #violin plot showing conscientiousness by education
+ggsave("Conscentious_Education.png", plot = plot.consc.edu, width = 17, height = 12, units = "cm")

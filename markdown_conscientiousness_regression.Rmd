@@ -246,7 +246,7 @@ plot1 <- ggplot(
     )
   )
 ) +
-  geom_bar(stat = "identity")+
+  geom_bar(stat = "identity", color = "black")+
   gendercolorsbar
 
 plot.pop.pyramid <- plot1 +
@@ -278,7 +278,7 @@ edu.gender.count <- edu.gender %>%
 
 
 plot.edu.gender <- ggplot(edu.gender.count, aes(fill = Gender, y= n, x=Education))+
-  geom_bar(position = "stack", stat = "identity")+
+  geom_bar(position = "stack", stat = "identity", color = "black")+
   labs(y= "Number of Participants", x="Highest Education Level")+
   ggtitle("Highest Education Level Achieved")+
   theme_minimal()+
@@ -287,7 +287,7 @@ plot.edu.gender <- ggplot(edu.gender.count, aes(fill = Gender, y= n, x=Education
 plot.edu.gender
 ```
 
-Finally, we will create a bar chart to show conscientiousness by gender.
+Next, we will create a bar chart to show conscientiousness by gender.
 
 ```{r consc by gender vis}
 plot.consc.gender <- ggplot(bfi.vis, aes(fill = Gender, x= Conscientiousness ))+
@@ -298,6 +298,24 @@ plot.consc.gender <- ggplot(bfi.vis, aes(fill = Gender, x= Conscientiousness ))+
   gendercolorsbar
 plot.consc.gender
 ```
+
+Finally, we will create a violin plot showing conscientiousness scores collapsed across gender
+```{r}
+vio.colors <- c("#264563", "#2a9d8f", "#e9c46a", "#f4a261", "#e76f51")
+
+plot.consc.edu <- ggplot(bfi.vis, aes( y = Conscientiousness, x = Education, fill = Education))+
+  geom_violin(alpha = 0.8)+
+  geom_boxplot(width = 0.1)+
+  scale_fill_manual(values = vio.colors)+
+  theme_minimal()+
+  theme(legend.position = "none")+
+  ggtitle("Conscientiousness Score by Education Level")
+
+plot.consc.edu
+
+```
+
+
 
 ### Key Information for Presentation
 
@@ -346,8 +364,11 @@ ggsave("Education_Level.png", plot = plot.edu.gender, width = 17, height = 12, u
 
 plot.consc.gender #histogram showing conscientiousness score by gender
 ggsave("Conscientiousness_Histogram.png", plot = plot.consc.gender, width = 15, height = 12, units = "cm")
+
+plot.consc.edu #violin plot showing conscientiousness by education
+ggsave("Conscentious_Education.png", plot = plot.consc.edu, width = 17, height = 12, units = "cm")
 ```
 ### Conclusion
 
-The results of our survey show that generally, females report as more conscientious than males, and that conscientiousness tends to increase with age. However, our sample also shows an unexpected result: In comparison to our reference education level, the only level of education that showed a significant difference in conscientiousness was "some college" and not those who had completed college or obtained a graduate degree. This is counter to what might be expected as conscentiousness is considered a predictor of higher-education success and thus you would expect to find higher levels of this personality trait present in the higher education population [(Roberts et al., 2014)](https://pubmed.ncbi.nlm.nih.gov/23276130/). 
+The results of our survey show that generally, females report as more conscientious than males, and that conscientiousness tends to increase with age. However, our sample also shows an unexpected result: In comparison to our reference education level, the only level of education that showed a significant difference in conscientiousness was "some college" and not those who had completed college or obtained a graduate degree. This is counter to what would be expected as conscientiousness is considered a predictor of higher-education success and thus you would expect to find higher levels of this personality trait present in the higher education population [(Roberts et al., 2014)](https://pubmed.ncbi.nlm.nih.gov/23276130/). 
 
